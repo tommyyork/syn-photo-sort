@@ -36,34 +36,42 @@ def removeEmptyFolders(path, removeRoot=True):
   if len(files) == 0 and removeRoot:
     os.rmdir(path)
 
-def checkForExiv2():
-  "Ensures we have exiv2 installed" 
+def checkForExiftool():
+  "Ensures we have exiftool installed" 
   try:
     devnull = open(os.devnull)
-    subprocess.Popen(['exiv2'], stdout=devnull, stderr=devnull).communicate()
+    subprocess.check_output(['exiftool', '-ver'], stderr=devnull)
   except OSError as e:
     if e.errno == os.errno.ENOENT:
-      print 'Exiv2 not installed!'
+      print 'Exiftool not installed, or not in PATH.'
       sys.exit(1)
 
-def outputFromExiv2(f):
-  "Output from exiv2.  We consume the errors and output from std out"
+def outputFromExiftool(f):
+  "Output from exiftool.  We consume the errors and output from std out"
+  output = None 
   try:
-    return subprocess.check_output(['exiv2', f, '-g', 'Exif.Photo.DateTimeOriginal', '-Pv'], stderr=subprocess.STDOUT)
-  except subprocess.CalledProcessError:
+    output = subprocess.check_output(['exiftool', '-createDate',  f], stderr=subprocess.STDOUT).decode('utf-8')
+    if ("Create Date" not in output):
+      output = subprocess.check_output(['exiftool', '-dateCreated', f], stderr=subprocess.STDOUT).decode('utf-8')
+    return output
+    # TODO: There's yet another exiftool flag - exiftool -time:all -a FILE - that can give you more records, but these mostly 
+    # seem similar to just file modification dates. Might be worth replacing the filesystem checks with this though.
+  except subprocess.CalledProcessError as e:
     return '' 
 
 def photoDate(f):
-  "Return the date/time on which the given photo was taken. Uses exiv2, on Synology by default"
-  output = outputFromExiv2(f)
-  if(not output or 'unknown image type' in output):
+  "Return the date/time on which the given photo was taken. Uses exiftool, on Synology by default"
+  output = outputFromExiftool(f)
+  if(not output):
     # No Exif, use modified date/time
-    return creationDate(f)
-    
+    return creationDate(f) 
   try:   
-    return datetime.strptime(output.split('\n')[0].lstrip(), "%Y:%m:%d %H:%M:%S")
-  except ValueError:
-    # Couldn't parse the field, probably bad exif data
+    parsedDate = datetime.strptime(output.split(':',1)[1].lstrip().rstrip(), "%Y:%m:%d %H:%M:%S")
+    return parsedDate
+  except ValueError as e:
+    print str(e)
+    print 'Error processing metadata date information from the file, will use filesystem creation date.'
+    # Couldn't parse the field, probably bad or missing exif data
     return creationDate(f)
 
 def creationDate(f):
@@ -84,6 +92,7 @@ def filenameExtension(f):
   return os.path.splitext(f)[1][1:].strip().lower()
 
 def handleFileMove(f, filename, fFmtName, problems, move, sourceDir, destDir, errorDir):
+  print "Processing: %s..." % f  
   fExt = filenameExtension(f)
 
   # Copy photos/videos into year and month subfolders. Name the copies according to
@@ -95,13 +104,17 @@ def handleFileMove(f, filename, fFmtName, problems, move, sourceDir, destDir, er
     pDate = photoDate(f)
     yr = pDate.year
     mo = pDate.month
-    moTxt = pDate.strftime("%b").upper()
     day = pDate.day
     fHash = None
     
     destFileName = pDate.strftime(fFmtName)
-    thisDestDir = destDir + '/%04d/%02d/%02d%s%04d' % (yr, mo, day, moTxt, yr)
-    
+    thisDestDir = destDir + '%04d/%04d-%02d-%02d' % (yr, yr, mo, day)
+   
+    if (move == True):
+      print "Attempting to move to: %s..." % thisDestDir
+    else:
+      print "Attempting to copy to: %s/..." % thisDestDir
+
     if not os.path.exists(thisDestDir):
       os.makedirs(thisDestDir)
 
@@ -118,7 +131,7 @@ def handleFileMove(f, filename, fFmtName, problems, move, sourceDir, destDir, er
 
       # If it's a match, bail and don't save this incoming file.
       if(fHash == destHash):
-        #print 'Bailing, duplicate...'
+        print 'Bailing, duplicate...'
         skipCopy = True
         break
 
@@ -157,7 +170,7 @@ def handleFileMove(f, filename, fFmtName, problems, move, sourceDir, destDir, er
 def main(argv):
 
   # Validate required packages...
-  checkForExiv2()
+  checkForExiftool()
 
   parser = argparse.ArgumentParser()
   optional = parser._action_groups.pop() # Edited this line
@@ -193,8 +206,8 @@ def main(argv):
   # The format for the new file names.
   filenameFmt = "%Y%m%d-%H%M%S"
 
-  # File Extensions we care about
-  photoExtensions = ['.JPG', '.PNG', '.THM', '.CR2', '.NEF', '.DNG', '.RAW', '.NEF', '.JPEG']
+  # TODO: many many more extensions to test and see if they yield the correct create dates, both for photo and video.
+  photoExtensions = ['.JPG', '.PNG', '.THM', '.CR2', '.NEF', '.DNG', '.RAW', '.NEF', '.JPEG', '.RW2', '.ARW', '.HEIC']
   videoExtensions = ['.3PG', '.MOV', '.MPG', '.MPEG', '.AVI', '.3GPP', '.MP4']
   
   scanExtensions = photoExtensions
@@ -211,7 +224,6 @@ def main(argv):
       for filename in filenames:
         if filename.upper().endswith(extension):
           f = os.path.join(root, filename)
-          print "Processing: %s..." % f
           handleFileMove(f, filename, filenameFmt, problems, move, sourceDir, destDir, errorDir)
 
   if(move == True):
