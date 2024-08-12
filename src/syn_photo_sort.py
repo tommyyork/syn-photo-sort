@@ -67,6 +67,7 @@ def photoDate(f):
     return creationDate(f) 
   try:   
     parsedDate = datetime.strptime(output.split(':',1)[1].lstrip().rstrip(), "%Y:%m:%d %H:%M:%S")
+    # TODO: Found at least one file with just "2014:12:16" -> may want to handle this case.
     return parsedDate
   except ValueError as e:
     print str(e)
