@@ -73,10 +73,11 @@ Because the code is still written in python2, you will need to invoke it as `pyt
 You can setup your cron job by using DSM and visiting the "Task Scheduler".  Create a new user
 `user defined script` and place all the command line calls you want to run.  Such as:
 ```bash
-syn_photo_sort -m /data/source /data/destination photo
+python2 syn_photo_sort -m /data/source /data/destination photo
 ```
 
 ## Todo
 
 * Port to Python3
 * Support more formats
+* There's a faster way to do this - exiftool could batch process all the images / videos in one invocation, then you can use that, rather than invoking exiftool potentially twice for each file.
