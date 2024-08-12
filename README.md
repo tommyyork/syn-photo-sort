@@ -1,6 +1,8 @@
 ## Intro
 This script will bucket photos from a given source directory into a dated tree structure in a destination directory.
 
+_This was forked from a script that used a faster exif library when invoked for each file, and will likely need to be updated to use something like pyexiftool (a wrapper for a continually running exiftool) to be performant._
+
 This script was written to run on a Synology NAS with DiskStation on board (python 2.7, and exiftool installed). If no EXIF date and time are found, it falls back to using the file systems "last modified" date and time.  It also handles duplicates by checking for MD5 collisions if matching timestamps are found.  If there aren't duplicates and just so happen to be unique photos taken at that exact same date and time, it will add a counter on to the end of the filename (look at the example below with the `-0001`) to prevent conflicts.
 
 The destination structure looks like he following:
