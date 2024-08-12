@@ -78,8 +78,9 @@ python2 syn_photo_sort -m /data/source /data/destination photo
 
 ## Todo
 
+* There's a faster way to invoke exiftool- exiftool could batch process all the images / videos in one invocation, then you can use the output, rather than invoking exiftool potentially twice for each file. See [common mistake 3](https://exiftool.org/mistakes.html#M3). This was a quick and dirty port of syn_photo_sort but I've got many 10's of thousands of photos to either dedupe or move still and this could run for days.
 * Port to Python3
 * Support more formats
 * Drag sidecar files along (.aae from Apple)
 * Improve hashing - either hash by chunks, offload it to command line md5sum or something. If there are a lot of conflicts it really slows down.
-* There's a faster way to invoke exiftool- exiftool could batch process all the images / videos in one invocation, then you can use that, rather than invoking exiftool potentially twice for each file.
+
