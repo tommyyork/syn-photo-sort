@@ -14,6 +14,16 @@ import argparse
 import time
 from datetime import datetime
 
+# Set up timing variables
+global exiftool_timing
+exiftool_timing = float(0)
+global exiftool_invokes
+exiftool_invokes = int(0)
+global hash_timing
+hash_timing = float(0)
+global hash_invokes
+hash_invokes = int(0)
+
 ######################## Functions #########################
 
 #TODO: junk mobile photos: FB_*,  *-ANIMATION.gif, *-COLLAGE*
@@ -43,16 +53,29 @@ def checkForExiftool():
     subprocess.check_output(['exiftool', '-ver'], stderr=devnull)
   except OSError as e:
     if e.errno == os.errno.ENOENT:
-      print 'Exiftool not installed, or not in PATH.'
+      print('Exiftool not installed, or not in PATH.')
       sys.exit(1)
 
 def outputFromExiftool(f):
   "Output from exiftool.  We consume the errors and output from std out"
   output = None 
+
+  global exiftool_timing
+  global exiftool_invokes 
+
   try:
+    t1 = time.perf_counter(), time.process_time()
     output = subprocess.check_output(['exiftool', '-createDate',  f], stderr=subprocess.STDOUT).decode('utf-8')
+    t2 = time.perf_counter(), time.process_time()
+    exiftool_timing = exiftool_timing + t2[0] - t1[0]
+    exiftool_invokes = exiftool_invokes + 1
+
     if ("Create Date" not in output):
+      t1 = time.perf_counter(), time.process_time()
       output = subprocess.check_output(['exiftool', '-dateCreated', f], stderr=subprocess.STDOUT).decode('utf-8')
+      t2 = time.perf_counter(), time.process_time()
+      exiftool_timing = exiftool_timing + t2[0] - t1[0]
+      exiftool_invokes = exiftool_invokes + 1
     return output
     # TODO: There's yet another exiftool flag - exiftool -time:all -a FILE - that can give you more records, but these mostly 
     # seem similar to just file modification dates. Might be worth replacing the filesystem checks with this though.
@@ -67,11 +90,10 @@ def photoDate(f):
     return creationDate(f) 
   try:   
     parsedDate = datetime.strptime(output.split(':',1)[1].lstrip().rstrip(), "%Y:%m:%d %H:%M:%S")
-    # TODO: Found at least one file with just "2014:12:16" -> may want to handle this case.
     return parsedDate
   except ValueError as e:
-    print str(e)
-    print 'Error processing metadata date information from the file, will use filesystem creation date.'
+    print(str(e))
+    print('Error processing metadata date information from the file, will use filesystem creation date.')
     # Couldn't parse the field, probably bad or missing exif data
     return creationDate(f)
 
@@ -93,8 +115,11 @@ def filenameExtension(f):
   return os.path.splitext(f)[1][1:].strip().lower()
 
 def handleFileMove(f, filename, fFmtName, problems, move, sourceDir, destDir, errorDir):
-  print "Processing: %s..." % f  
+  print("Processing: %s..." % f)
   fExt = filenameExtension(f)
+
+  global hash_timing
+  global hash_invokes
 
   # Copy photos/videos into year and month subfolders. Name the copies according to
   # their timestamps. If more than one photo/video has the same timestamp, add
@@ -109,12 +134,12 @@ def handleFileMove(f, filename, fFmtName, problems, move, sourceDir, destDir, er
     fHash = None
     
     destFileName = pDate.strftime(fFmtName)
-    thisDestDir = destDir + '%04d/%04d-%02d-%02d' % (yr, yr, mo, day)
+    thisDestDir = destDir + '/%04d/%04d-%02d-%02d' % (yr, yr, mo, day)
    
     if (move == True):
-      print "Attempting to move to: %s..." % thisDestDir
+      print("Attempting to move to: %s..." % thisDestDir)
     else:
-      print "Attempting to copy to: %s/..." % thisDestDir
+      print("Attempting to copy to: %s/..." % thisDestDir)
 
     if not os.path.exists(thisDestDir):
       os.makedirs(thisDestDir)
@@ -125,14 +150,26 @@ def handleFileMove(f, filename, fFmtName, problems, move, sourceDir, destDir, er
 
       # We found a duplicate at the destination, get the incoming hash
       if(fHash is None):
+        t1 = time.perf_counter(), time.process_time()
         fHash = hashlib.md5(open(f, 'rb').read()).hexdigest()
+        t2 = time.perf_counter(), time.process_time()
+        hash_timing = hash_timing + t2[0] - t1[0]
+        # print(f"Hash timing: {hash_timing:.2f}")
+        hash_invokes = hash_invokes + 1
+        # print(f"Hash invokes: {hash_invokes:d}")
 
       # Get the already existing files hash
+      t1 = time.perf_counter(), time.process_time()
       destHash = hashlib.md5(open(duplicate, 'rb').read()).hexdigest()
+      t2 = time.perf_counter(), time.process_time()
+      hash_timing = hash_timing + t2[0] - t1[0]
+      # print(f"Hash timing: {hash_timing:.2f}")
+      hash_invokes = hash_invokes + 1
+      # print(f"Hash invokes: {hash_invokes:d}")
 
       # If it's a match, bail and don't save this incoming file.
       if(fHash == destHash):
-        print 'Bailing, duplicate...'
+        print('Bailing, duplicate...')
         skipCopy = True
         break
 
@@ -186,10 +223,11 @@ def main(argv):
 
   # Where the photos are and where they're going.
   sourceDir = args.source
-  destDir = args.destination
+  # Remove trailing slash from the destination directory if present.
+  destDir = args.destination.rstrip('/')
   scanType = args.type.upper()
   if(scanType != 'PHOTO' and scanType != 'VIDEO'):
-    print "Incorrect type specified! Must be either 'photo' or 'video'"
+    print("Incorrect type specified! Must be either 'photo' or 'video'")
     sys.exit(1)
   
   errorDir = destDir + '/Unsorted/'
@@ -197,18 +235,20 @@ def main(argv):
 
   # Validate these directories exist...
   if not os.path.exists(sourceDir):
-    print 'Source Directory does not exist!'
+    print('Source Directory does not exist!')
     sys.exit(1)
   if not os.path.exists(destDir):
     # os.makedirs(destDir)
-    print 'Destination Directory does not exist!'
+    print('Destination Directory does not exist!')
     sys.exit(1)
 
   # The format for the new file names.
   filenameFmt = "%Y%m%d-%H%M%S"
 
-  # TODO: many many more extensions to test and see if they yield the correct create dates, both for photo and video.
+  # File Extensions we care about
   photoExtensions = ['.JPG', '.PNG', '.THM', '.CR2', '.NEF', '.DNG', '.RAW', '.NEF', '.JPEG', '.RW2', '.ARW', '.HEIC']
+  sidecarExtensions = ['.AAE', '.CMP']
+  # TODO: many many more extensions to test and see if they yield the correct create dates, both for photo and video.
   videoExtensions = ['.3PG', '.MOV', '.MPG', '.MPEG', '.AVI', '.3GPP', '.MP4']
   
   scanExtensions = photoExtensions
@@ -232,14 +272,21 @@ def main(argv):
 
   # Report the problem files, if any.
   if len(problems) > 0:
-    print "\nProblem files:"
-    print "\n".join(problems)
-    print "These can be found in: %s" % errorDir
+    print("\nProblem files:")
+    print("\n".join(problems))
+    print("These can be found in: %s" % errorDir)
   else :
-    print "\nSuccess!"
+    print("\nSuccess!")
+
+  global exiftool_invokes
+  global exiftool_timing
+  global hash_invokes
+  global hash_timing
+  print("Performance stats (real time):")
+  print(f"Exiftool invocations: {exiftool_timing / exiftool_invokes:.2f} seconds per item")
+  print(f"Hashing: {hash_timing / hash_invokes:.4f} seconds per item")
 
 ######################## Startup ###########################
-
 
 if __name__ == "__main__":
    main(sys.argv[1:])
