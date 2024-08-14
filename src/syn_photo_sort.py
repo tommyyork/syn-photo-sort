@@ -13,6 +13,7 @@ import datetime
 import argparse
 import time
 from datetime import datetime
+from exiftool import ExifTool
 
 # Set up timing variables
 global exiftool_timing
@@ -44,7 +45,11 @@ def removeEmptyFolders(path, removeRoot=True):
   # if folder empty, delete it
   files = os.listdir(path)
   if len(files) == 0 and removeRoot:
-    os.rmdir(path)
+    try:
+      os.rmdir(path)
+    except OSError as e:
+      print("Directory {path} not empty, so not deleting.")
+      print(str(e))
 
 def checkForExiftool():
   "Ensures we have exiftool installed" 
@@ -154,18 +159,14 @@ def handleFileMove(f, filename, fFmtName, problems, move, sourceDir, destDir, er
         fHash = hashlib.md5(open(f, 'rb').read()).hexdigest()
         t2 = time.perf_counter(), time.process_time()
         hash_timing = hash_timing + t2[0] - t1[0]
-        # print(f"Hash timing: {hash_timing:.2f}")
         hash_invokes = hash_invokes + 1
-        # print(f"Hash invokes: {hash_invokes:d}")
 
       # Get the already existing files hash
       t1 = time.perf_counter(), time.process_time()
       destHash = hashlib.md5(open(duplicate, 'rb').read()).hexdigest()
       t2 = time.perf_counter(), time.process_time()
       hash_timing = hash_timing + t2[0] - t1[0]
-      # print(f"Hash timing: {hash_timing:.2f}")
       hash_invokes = hash_invokes + 1
-      # print(f"Hash invokes: {hash_invokes:d}")
 
       # If it's a match, bail and don't save this incoming file.
       if(fHash == destHash):
@@ -210,14 +211,15 @@ def main(argv):
   # Validate required packages...
   checkForExiftool()
 
-  parser = argparse.ArgumentParser()
+  parser = argparse.ArgumentParser(prog='syn_photo_sort', 
+                                   description='Application designed to sort photos into a directory tree based on creation date derived from metadata.')
   optional = parser._action_groups.pop() # Edited this line
   required = parser.add_argument_group('required arguments')
-  
   required.add_argument('source', type=str, help='The source directory to read image/video files from.')
   required.add_argument('destination', type=str, help='The destination directory to put image/video files, renamed and with the proper folder structure')
   required.add_argument('type', type=str, help='The type of files to move. Specify one: photo, video')
   optional.add_argument('-m', '--move', action='store_true', help='Specify to move source files to their new location instead of copying.')
+  optional.add_argument('-v', '--verbose', action='store_true', help="Show performance information for hashing and exiftool invocation.")
   parser._action_groups.append(optional) # added this line
   args = parser.parse_args()
 
@@ -246,10 +248,10 @@ def main(argv):
   filenameFmt = "%Y%m%d-%H%M%S"
 
   # File Extensions we care about
-  photoExtensions = ['.JPG', '.PNG', '.THM', '.CR2', '.NEF', '.DNG', '.RAW', '.NEF', '.JPEG', '.RW2', '.ARW', '.HEIC']
-  sidecarExtensions = ['.AAE', '.CMP']
+  photoExtensions = ['.JPG', '.PNG', '.THM', '.CR2', '.NEF', '.DNG', '.RAW', '.NEF', '.JPEG', '.RW2', '.ARW', '.HEIC', '.PSD', '.TIF']
+  sidecarExtensions = ['.AAE', '.XMP']
   # TODO: many many more extensions to test and see if they yield the correct create dates, both for photo and video.
-  videoExtensions = ['.3PG', '.MOV', '.MPG', '.MPEG', '.AVI', '.3GPP', '.MP4']
+  videoExtensions = ['.3PG', '.MOV', '.MPG', '.MPEG', '.AVI', '.3GPP', '.MP4', '.ASF']
   
   scanExtensions = photoExtensions
   if(scanType == 'VIDEO'):
@@ -278,13 +280,16 @@ def main(argv):
   else :
     print("\nSuccess!")
 
-  global exiftool_invokes
-  global exiftool_timing
-  global hash_invokes
-  global hash_timing
-  print("Performance stats (real time):")
-  print(f"Exiftool invocations: {exiftool_timing / exiftool_invokes:.2f} seconds per item")
-  print(f"Hashing: {hash_timing / hash_invokes:.4f} seconds per item")
+  if args.verbose:
+    global exiftool_invokes
+    global exiftool_timing
+    global hash_invokes
+    global hash_timing
+    print("Performance stats (real time):")
+    if exiftool_invokes > 0:
+      print(f"Exiftool invocations: {exiftool_timing / exiftool_invokes:.2f} seconds per item")
+    if hash_invokes > 0:
+      print(f"Hashing: {hash_timing / hash_invokes:.4f} seconds per item")
 
 ######################## Startup ###########################
 
