@@ -1,0 +1,5 @@
+@eaDir/
+.DS_Store
+Test\ Folders/
+get-pip.py
+site-packages
