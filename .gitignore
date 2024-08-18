@@ -3,3 +3,7 @@
 Test\ Folders/
 get-pip.py
 site-packages
+dest/
+syn_photo_sort
+test_folders
+tests
