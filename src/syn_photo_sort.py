@@ -130,11 +130,11 @@ def filenameExtension(f):
   "Return the file extension normalized to lowercase."
   return os.path.splitext(f)[1][1:].strip().lower()
 
-def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFileName, suffix, fExt, errorDir, move):
+def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFileName, suffix, fExt, errorDir, move, args):
     global hash_timing
     global hash_invokes
             
-    print(f"Attempting to {'move' if move else 'copy'} {f}...")
+    if (args.verbose): print(f"Attempting to {'move' if move else 'copy'} {f}...")
     
     try:
       skipCopy = False
@@ -159,7 +159,7 @@ def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFil
 
         # If it's a match, bail and don't save this incoming file.
         if(fHash == destHash):
-          print('Bailing, duplicate...')
+          if (args.verbose): print('Bailing, duplicate...')
           skipCopy = True
           break
 
@@ -170,10 +170,10 @@ def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFil
       if(skipCopy == False):
         if(move == False):
           shutil.copy2(f, duplicate)
-          print(f"to: {duplicate}")
+          if (args.verbose): print(f"to: {duplicate}")
         else:
           shutil.move(f, duplicate)
-          print(f"to: {duplicate}")
+          if (args.verbose): print(f"to: {duplicate}")
       else:
         if(move == True):
           os.remove(f)
@@ -183,11 +183,11 @@ def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFil
 
       if(move == False):
         shutil.copy2(f, errorDir + filename)
-        print(f"to: {errorDir + duplicate}")
+        if (args.verbose): print(f"to: {errorDir + duplicate}")
         # print here
       else:
         shutil.move(f, errorDir + filename)
-        print(f"to: {errorDir + duplicate}")
+        if (args.verbose): print(f"to: {errorDir + duplicate}")
         # print here
 
       print(str(e))
@@ -201,8 +201,8 @@ def getUnderscoreOfSidecar(sidecar):
   """ sidecar: full path to sidecar """
   sidecar = os.path.split(sidecar)[1]
   sidecar = os.path.splitext(sidecar)[0]
-  underscoredNumber = re.search(r'(_[0-9]$)', sidecar).group()
-  return "" if not len(underscoredNumber) else underscoredNumber
+  match = re.search(r'(_[0-9]$)', sidecar)
+  return "" if match is None else match.group()
 
 
 def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems, move, sourceDir, destDir, errorDir):
@@ -213,7 +213,7 @@ def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems,
   sourceDir: test_folders/test
   """
   
-  print("")
+  if (args.verbose): print("")
   print("Processing: %s..." % f)
 
   fExt = filenameExtension(f)
@@ -223,12 +223,16 @@ def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems,
   # Check for exact sidecar match
   for sidecarExtension in sidecarExtensions:
     sidecarExtension = sidecarExtension.lower()
-    potentialSidecar = os.path.join(os.path.splitext(f)[0] + sidecarExtension)
-    if os.path.exists(potentialSidecar):
-      print(f"Found metadata sidecar, will copy/move as well: {potentialSidecar}")
-      sidecar = potentialSidecar
-      sidecarExt = sidecarExtension
-      break
+    potentialExactSidecars = []
+    potentialExactSidecars.append(os.path.join(os.path.splitext(f)[0] + sidecarExtension))
+    potentialExactSidecars.append(f + sidecarExtension)
+    for potentialExactSidecar in potentialExactSidecars:
+      if os.path.exists(potentialExactSidecar):
+        if (args.verbose): print(f"Found metadata sidecar, will copy/move as well: {potentialExactSidecar}")
+        sidecar = potentialExactSidecar
+        sidecarFilename = os.path.split(sidecar)[1]
+        sidecarExt = sidecarExtension
+        break
     if (args.fuzzy and len(sidecar) == 0):
       for sidecarExtension in sidecarExtensions:
         sidecarExtension = sidecarExtension.lower()
@@ -242,7 +246,7 @@ def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems,
             sidecar = n
             sidecarFilename = os.path.split(sidecar)[1]
             sidecarExt = sidecarExtension
-            print(f"Found metadata sidecar fuzzily matched, will copy/move as well: {n}")
+            if (args.verbose): print(f"Found metadata sidecar fuzzily matched, will copy/move as well: {n}")
             break
     
   # Copy photos/videos into year and month subfolders. Name the copies according to
@@ -269,9 +273,9 @@ def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems,
     if (len(sidecar) > 1):
       duplicateSidecar = thisDestDir + '/%s' % (destFileName) + getUnderscoreOfSidecar(sidecar) + sidecarExt 
 
-    copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFileName, suffix, fExt, errorDir, move)
+    copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFileName, suffix, fExt, errorDir, move, args)
     if (len(sidecar) > 0):
-      copyOrHash(et, duplicateSidecar, sidecar, sidecarFilename, problems, fHash, thisDestDir, destSidecarFilename, suffix, sidecarExt, errorDir, move)
+      copyOrHash(et, duplicateSidecar, sidecar, sidecarFilename, problems, fHash, thisDestDir, destSidecarFilename, suffix, sidecarExt, errorDir, move, args)
 
   except Exception as e:
     print(traceback.extract_stack())
@@ -324,7 +328,8 @@ def main(argv):
     filenameFmt = "%Y%m%d-%H%M%S"
 
     # File Extensions we care about
-    photoExtensions = ['.JPG', '.PNG', '.THM', '.CR2', '.NEF', '.DNG', '.RAW', '.NEF', '.JPEG', '.RW2', '.ARW', '.HEIC', '.PSD', '.TIF']
+    photoExtensions = ['.JPG', '.PNG', '.THM', '.CR2', '.NEF', '.DNG', '.RAW', '.NEF', '.JPEG', '.RW2',
+                       '.ARW', '.HEIC', '.PSD', '.TIF', '.TIFF', '.BMP']
     # sidecarExtensions we care about
     sidecarExtensions = ['.AAE', '.XMP']
     # TODO: many many more extensions to test and see if they yield the correct create dates, both for photo and video.
