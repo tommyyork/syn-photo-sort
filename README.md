@@ -25,7 +25,7 @@ Dest/
 ## Usage
 These are the program arguments:
 ```
-usage: syn_photo_sort.py [-h] [-m] [-f] source destination type
+usage: syn_photo_sort.py [-h] [-m] [-f] [-v] source destination type
 
 required arguments:
   source       The source directory to read image/video files from.
@@ -34,9 +34,10 @@ required arguments:
   type         The type of files to move. Specify one: photo, video, all
 
 optional arguments:
-  -h, --help   show this help message and exit
-  -m, --move   Specify to move source files to their new location instead of
-  -f, --fuzzy  Some iPhoto libraries have aae files that include underscores + a number, potentially indicating a revision. With this arugment, make the same attempt to copy/move the sidecar file, and append the origin underscore + number.
+  -h, --help    show this help message and exit
+  -m, --move    Specify to move source files to their new location instead of
+  -v, --verbose Stats on hashing and and exiftool execution.
+  -f, --fuzzy   Some iPhoto libraries have aae files that include underscores + a number, potentially indicating a revision. With this arugment, make the same attempt to copy/move the sidecar file, and append the origin underscore + number.
 ```
 
 The source directory is scanned recursively, for whatever kind of file you specified via the type flag of "photo" or 
@@ -83,3 +84,4 @@ python syn_photo_sort -m /data/source /data/destination photo
 
 * Would be great to have an csv output file that reported every file copied / moved, whether it was a duplicate, etc.
 * Sometimes exiftool is not closing properly, yielding `/usr/bin/python: bad interpreter: Text file busy`
+* DSM 7.2 leaves @eaDir in many directories, with previews of images. Would be nice to have an option to remove the directory if it's the only thing left. Or .DS_Store.
