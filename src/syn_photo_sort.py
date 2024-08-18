@@ -36,8 +36,10 @@ def removeEmptyFolders(path, removeRoot=True):
     return
 
   # remove empty subfolders
+  unnecessaryDirectories = ["@eaDir", ".DS_Store"]
   files = os.listdir(path)
-  if len(files):
+  filteredFiles = list(filter(lambda x: x not in files for x in unnecessaryDirectories)) # todo check this
+  if len(filteredFiles):
     for f in files:
       fullpath = os.path.join(path, f)
       if os.path.isdir(fullpath):
@@ -204,6 +206,38 @@ def getUnderscoreOfSidecar(sidecar):
   match = re.search(r'(_[0-9]$)', sidecar)
   return "" if match is None else match.group()
 
+def findRelevantSidecar(args, f, sidecarExtensions):
+  sidecar = str()
+  sidecarExt = str()
+  # Check for exact sidecar match
+  potentialExactSidecars = []
+  for ext in sidecarExtensions:
+    ext = ext.lower()
+    potentialExactSidecars.append(os.path.join(os.path.splitext(f)[0] + ext))
+    potentialExactSidecars.append(f + ext) # e.g. "IMG_3323_CR2_shotwell.jpg.xmp"
+    for potentialExactSidecar in potentialExactSidecars:
+      if os.path.exists(potentialExactSidecar):
+        if (args.verbose): print(f"Found metadata sidecar, will copy/move as well: {potentialExactSidecar}")
+        sidecar = potentialExactSidecar
+        sidecarFile = os.path.split(sidecar)[1]
+        sidecarExt = ext
+        return (sidecarFile, sidecarExt)
+    if (args.fuzzy and len(sidecar) == 0):
+      for ext in sidecarExtensions:
+        ext = ext.lower()
+        # get full path, without extension
+        fileWithoutExt = os.path.splitext(f)[0]
+        # split off whatever _# at the end
+        fileWithoutExtOrUnderscore = re.sub(r'(_[0-9]$)', '', fileWithoutExt)
+        globString = os.path.join(fileWithoutExtOrUnderscore) + '*' + ext
+        for n in glob.glob(globString):
+          if os.path.exists(n):
+            sidecar = n
+            sidecarExt = ext
+            if (args.verbose): print(f"Found metadata sidecar fuzzily matched, will copy/move as well: {n}")
+            return (sidecarFile, sidecarExt)
+  return None
+
 
 def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems, move, sourceDir, destDir, errorDir):
   """
@@ -218,37 +252,8 @@ def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems,
 
   fExt = filenameExtension(f)
 
-  sidecar = str()
-  sidecarExt = str()
-  # Check for exact sidecar match
-  for sidecarExtension in sidecarExtensions:
-    sidecarExtension = sidecarExtension.lower()
-    potentialExactSidecars = []
-    potentialExactSidecars.append(os.path.join(os.path.splitext(f)[0] + sidecarExtension))
-    potentialExactSidecars.append(f + sidecarExtension)
-    for potentialExactSidecar in potentialExactSidecars:
-      if os.path.exists(potentialExactSidecar):
-        if (args.verbose): print(f"Found metadata sidecar, will copy/move as well: {potentialExactSidecar}")
-        sidecar = potentialExactSidecar
-        sidecarFilename = os.path.split(sidecar)[1]
-        sidecarExt = sidecarExtension
-        break
-    if (args.fuzzy and len(sidecar) == 0):
-      for sidecarExtension in sidecarExtensions:
-        sidecarExtension = sidecarExtension.lower()
-        # get full path, without extension
-        fileWithoutExt = os.path.splitext(f)[0]
-        # split off whatever _# at the end
-        fileWithoutExtOrUnderscore = re.sub(r'(_[0-9]$)', '', fileWithoutExt)
-        globString = os.path.join(fileWithoutExtOrUnderscore) + '*' + sidecarExtension
-        for n in glob.glob(globString):
-          if os.path.exists(n):
-            sidecar = n
-            sidecarFilename = os.path.split(sidecar)[1]
-            sidecarExt = sidecarExtension
-            if (args.verbose): print(f"Found metadata sidecar fuzzily matched, will copy/move as well: {n}")
-            break
-    
+  sidecar = findRelevantSidecar(args, f, sidecarExtensions)
+
   # Copy photos/videos into year and month subfolders. Name the copies according to
   # their timestamps. If more than one photo/video has the same timestamp, add
   # suffixes 0001, 0002, 0003, etc. to the names. 
@@ -270,8 +275,8 @@ def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems,
       os.makedirs(thisDestDir)
 
     duplicate = thisDestDir + '/%s.' % (destFileName) + fExt
-    if (len(sidecar) > 1):
-      duplicateSidecar = thisDestDir + '/%s' % (destFileName) + getUnderscoreOfSidecar(sidecar) + sidecarExt 
+    if (sidecar is not None):
+      duplicateSidecar = thisDestDir + '/%s' % (destFileName) + getUnderscoreOfSidecar(sidecar[0]) + sidecar[1]
 
     copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFileName, suffix, fExt, errorDir, move, args)
     if (len(sidecar) > 0):
