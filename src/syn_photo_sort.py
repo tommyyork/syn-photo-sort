@@ -103,6 +103,7 @@ def photoDate(et, f):
     # No Exif, use modified date/time
     return creationDate(f) 
   try:
+    # There's a cleaner way to do this in exiftool, consider it a TODO.
     rawDate = output.split(':',1)[1].lstrip().rstrip()
     parsedDate = datetime.strptime(rawDate, "%Y:%m:%d %H:%M:%S")
     return parsedDate
@@ -173,7 +174,6 @@ def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFil
         else:
           shutil.move(f, duplicate)
           print(f"to: {duplicate}")
-          # print here
       else:
         if(move == True):
           os.remove(f)
@@ -199,7 +199,6 @@ def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFil
 
 def getUnderscoreOfSidecar(sidecar):
   """ sidecar: full path to sidecar """
-  print(f"testing sidecar {sidecar}")
   sidecar = os.path.split(sidecar)[1]
   sidecar = os.path.splitext(sidecar)[0]
   underscoredNumber = re.search(r'(_[0-9]$)', sidecar).group()
@@ -224,7 +223,7 @@ def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems,
   # Check for exact sidecar match
   for sidecarExtension in sidecarExtensions:
     sidecarExtension = sidecarExtension.lower()
-    potentialSidecar = os.path.join(sourceDir, os.path.splitext(filename)[0] + sidecarExtension)
+    potentialSidecar = os.path.join(os.path.splitext(f)[0] + sidecarExtension)
     if os.path.exists(potentialSidecar):
       print(f"Found metadata sidecar, will copy/move as well: {potentialSidecar}")
       sidecar = potentialSidecar
@@ -233,13 +232,11 @@ def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems,
     if (args.fuzzy and len(sidecar) == 0):
       for sidecarExtension in sidecarExtensions:
         sidecarExtension = sidecarExtension.lower()
-        filenameWithoutExt = os.path.splitext(filename)[0]
-        filenameWithoutExtOrUnderscore = re.sub(r'(_[0-9]$)', '', filenameWithoutExt)
-        if filenameWithoutExt is not filenameWithoutExtOrUnderscore:
-          filenameUnderscore = re.findall(r'(_[0-9]$)', filenameWithoutExt)[0]
-        else:
-          filenameUnderscore = ""
-        globString = os.path.join(sourceDir,filenameWithoutExtOrUnderscore) + '*' + sidecarExtension + filenameUnderscore
+        # get full path, without extension
+        fileWithoutExt = os.path.splitext(f)[0]
+        # split off whatever _# at the end
+        fileWithoutExtOrUnderscore = re.sub(r'(_[0-9]$)', '', fileWithoutExt)
+        globString = os.path.join(fileWithoutExtOrUnderscore) + '*' + sidecarExtension
         for n in glob.glob(globString):
           if os.path.exists(n):
             sidecar = n
@@ -349,6 +346,10 @@ def main(argv):
           if filename.upper().endswith(extension):
             f = os.path.join(root, filename)
             handleFileMove(et, f, filename, filenameFmt, sidecarExtensions, args, problems, move, sourceDir, destDir, errorDir)
+      # Happens at a kind of weird point in the sequence - after going over
+      # every filetype. For mixed folders (iPhoto libraries) this results in multiple
+      # attempts. @eaDir on DSM 7.2 may be screwing with things too, this holds extended
+      # data (e.g. previews of the photos we just moved!) and can be safely removed.
       if(move == True):
         removeEmptyFolders(sourceDir, False)
 
