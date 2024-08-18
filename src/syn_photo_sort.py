@@ -198,7 +198,7 @@ def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFil
       sys.exit("Execution stopped.")
 
 def getUnderscoreOfSidecar(sidecar):
-  """ sidecar: Sidecar filename without extension, including path"""
+  """ sidecar: full path to sidecar """
   print(f"testing sidecar {sidecar}")
   sidecar = os.path.split(sidecar)[1]
   sidecar = os.path.splitext(sidecar)[0]
