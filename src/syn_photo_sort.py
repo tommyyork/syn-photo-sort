@@ -26,6 +26,9 @@ hash_timing = float(0)
 global hash_invokes
 hash_invokes = int(0)
 
+global processed
+processed = int(0)
+
 ######################## Functions #########################
 
 #TODO: junk mobile photos: FB_*,  *-ANIMATION.gif, *-COLLAGE*
@@ -38,7 +41,7 @@ def removeEmptyFolders(path, removeRoot=True):
   # remove empty subfolders
   unnecessaryDirectories = ["@eaDir", ".DS_Store"]
   files = os.listdir(path)
-  filteredFiles = list(filter(lambda x: x not in files for x in unnecessaryDirectories)) # todo check this
+  filteredFiles = list(filter((lambda x: all(x not in files for x in unnecessaryDirectories)), files)) # todo check this
   if len(filteredFiles):
     for f in files:
       fullpath = os.path.join(path, f)
@@ -193,7 +196,7 @@ def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFil
         # print here
 
       print(str(e))
-      print(traceback.extract_stack())
+      print(traceback.format_exc())
       problems.append(f)
 
       et.terminate()
@@ -202,26 +205,41 @@ def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFil
 def getUnderscoreOfSidecar(sidecar):
   """ sidecar: full path to sidecar """
   sidecar = os.path.split(sidecar)[1]
-  sidecar = os.path.splitext(sidecar)[0]
-  match = re.search(r'(_[0-9]$)', sidecar)
+  sidecarWithoutExt = os.path.splitext(sidecar)[0]
+  match = re.search(r'(_[0-9]$)', sidecarWithoutExt)
+  print(f"found underscore: {match.group()}")
   return "" if match is None else match.group()
 
-def findRelevantSidecar(args, f, sidecarExtensions):
+def sidecarIsRelevant(et, sidecar, f):
+  # while .xmp files have a raw file name pointing to the raw image,
+  # .aae files do not, so this is not really relevant. We do not want
+  # to copy an .xmp for a .jpg for which it is not relevant.
+  sExt = os.path.splitext(sidecar)[1]
+  if sExt == ".aae" or sExt == ".AAE": 
+    return True
+  else:
+    exiftoolOutput = et.execute("-RawFileName", sidecar)
+    if (exiftoolOutput):
+      rawFileName = exiftoolOutput.split(":")[1].strip().rstrip("")
+      imageFilename = os.path.split(f)[1]
+      return rawFileName == imageFilename
+
+
+def findRelevantSidecar(et, args, f, sidecarExtensions):
   sidecar = str()
-  sidecarExt = str()
   # Check for exact sidecar match
-  potentialExactSidecars = []
-  for ext in sidecarExtensions:
+  for ext in [".xmp"]:
     ext = ext.lower()
+    potentialExactSidecars = []
     potentialExactSidecars.append(os.path.join(os.path.splitext(f)[0] + ext))
     potentialExactSidecars.append(f + ext) # e.g. "IMG_3323_CR2_shotwell.jpg.xmp"
     for potentialExactSidecar in potentialExactSidecars:
       if os.path.exists(potentialExactSidecar):
         if (args.verbose): print(f"Found metadata sidecar, will copy/move as well: {potentialExactSidecar}")
-        sidecar = potentialExactSidecar
-        sidecarFile = os.path.split(sidecar)[1]
-        sidecarExt = ext
-        return (sidecarFile, sidecarExt)
+        if (sidecarIsRelevant(et, potentialExactSidecar, f)):
+          sidecar = potentialExactSidecar
+          return sidecar
+  for ext in [".aae"]:
     if (args.fuzzy and len(sidecar) == 0):
       for ext in sidecarExtensions:
         ext = ext.lower()
@@ -233,9 +251,8 @@ def findRelevantSidecar(args, f, sidecarExtensions):
         for n in glob.glob(globString):
           if os.path.exists(n):
             sidecar = n
-            sidecarExt = ext
             if (args.verbose): print(f"Found metadata sidecar fuzzily matched, will copy/move as well: {n}")
-            return (sidecarFile, sidecarExt)
+            return sidecar
   return None
 
 
@@ -249,10 +266,14 @@ def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems,
   
   if (args.verbose): print("")
   print("Processing: %s..." % f)
+  global processed
+  processed += 1
 
   fExt = filenameExtension(f)
+  if fExt in ["cr2", "dng"]:
+    fExt = fExt.upper()
 
-  sidecar = findRelevantSidecar(args, f, sidecarExtensions)
+  sidecar = findRelevantSidecar(et, args, f, sidecarExtensions)
 
   # Copy photos/videos into year and month subfolders. Name the copies according to
   # their timestamps. If more than one photo/video has the same timestamp, add
@@ -266,25 +287,42 @@ def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems,
     day = pDate.day
     fHash = None
     
-    destFileName = pDate.strftime(fFmtName)
-    if (len(sidecar) > 0):
-      destSidecarFilename = destFileName + os.path.splitext(sidecar)[1]
+    # If we have a matching sidecar, use that sidecar for the filename instead.
+    destFileName = None
+    if sidecar is not None and os.path.splitext(sidecar)[1] == ".xmp":
+        rawFileName = et.execute("-RawFileName", sidecar).split(":")[1].strip().rstrip("")
+        # for some reason in this function extensions now do not have periods in front of them.
+        rawExtension = os.path.splitext(rawFileName)[1]
+        fExt = rawExtension.lstrip(".")
+        if (rawExtension == fExt):
+          destFileName = os.path.splitext(rawFileName)[0]
+    # either no sidecar, or the sidecar was for a different file (likely a CR2, and not a jpg)
+    if not destFileName: destFileName = pDate.strftime(fFmtName)
+
     thisDestDir = destDir + '/%04d/%04d-%02d-%02d' % (yr, yr, mo, day)
 
     if not os.path.exists(thisDestDir):
       os.makedirs(thisDestDir)
 
     duplicate = thisDestDir + '/%s.' % (destFileName) + fExt
-    if (sidecar is not None):
-      duplicateSidecar = thisDestDir + '/%s' % (destFileName) + getUnderscoreOfSidecar(sidecar[0]) + sidecar[1]
-
     copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFileName, suffix, fExt, errorDir, move, args)
-    if (len(sidecar) > 0):
-      copyOrHash(et, duplicateSidecar, sidecar, sidecarFilename, problems, fHash, thisDestDir, destSidecarFilename, suffix, sidecarExt, errorDir, move, args)
+
+    if (sidecar is not None):
+      sidecarFilename = os.path.split(sidecar)[1]
+      sExt = os.path.splitext(sidecar)[1]
+      if (sExt == ".aae"):
+        destSidecarFilename = destFileName + getUnderscoreOfSidecar(sidecar)
+      else:
+        destSidecarFilename = destFileName
+      
+      duplicateSidecar = thisDestDir + '/%s.' % (destFileName) + sExt
+      copyOrHash(et, duplicateSidecar, sidecar, sidecarFilename, problems, fHash, thisDestDir, destSidecarFilename, suffix, sExt, errorDir, move, args)
 
   except Exception as e:
-    print(traceback.extract_stack())
     print(str(e))
+    print(traceback.format_exc())
+    et.terminate()
+    sys.exit()
    
 
 ###################### Main program ########################
@@ -305,6 +343,7 @@ def main(argv):
     optional.add_argument('-m', '--move', action='store_true', help='Specify to move source files to their new location instead of copying.')
     optional.add_argument('-v', '--verbose', action='store_true', help="Show performance information for hashing and exiftool invocation.")
     optional.add_argument('-f', '--fuzzy', action='store_true', help="Drop underscores at the end of iPhone files and AAE files to find the best matching AAE sidecar file to copy/move.")
+    # add ignore errors here
     parser._action_groups.append(optional) # added this line
     args = parser.parse_args()
 
@@ -370,6 +409,7 @@ def main(argv):
       print("These can be found in: %s" % errorDir)
     else :
       print("\nSuccess!")
+      print(f"Processed {processed} files.")
 
     if args.verbose:
       global exiftool_invokes
