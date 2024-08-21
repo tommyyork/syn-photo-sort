@@ -26,16 +26,33 @@ hash_timing = float(0)
 global hash_invokes
 hash_invokes = int(0)
 
+global processed
+processed = int(0)
+
 ######################## Functions #########################
 
 #TODO: junk mobile photos: FB_*,  *-ANIMATION.gif, *-COLLAGE*
 
 def removeEmptyFolders(path, removeRoot=True):
   'Function to remove empty folders'
+  directoriesToDelete = ["@eaDir"]
+  filesToDelete = [".DS_Store"]
+
   if not os.path.isdir(path):
     return
 
-  # remove empty subfolders
+  # remove @eaDir and .DS_Store
+  files = os.listdir(path)
+  for f in files:
+    if f in directoriesToDelete:
+      fullpath = os.path.join(path, f)
+      # Remove Synology preview folders somewhat dangerously.
+      shutil.rmtree(fullpath)
+    if f in filesToDelete:
+      fullpath= os.path.join(path, f)
+      if os.path.exists(fullpath):
+        os.remove(fullpath)
+    
   files = os.listdir(path)
   if len(files):
     for f in files:
@@ -130,11 +147,11 @@ def filenameExtension(f):
   "Return the file extension normalized to lowercase."
   return os.path.splitext(f)[1][1:].strip().lower()
 
-def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFileName, suffix, fExt, errorDir, move):
+def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFileName, suffix, fExt, errorDir, move, args):
     global hash_timing
     global hash_invokes
             
-    print(f"Attempting to {'move' if move else 'copy'} {f}...")
+    if (args.verbose): print(f"Attempting to {'move' if move else 'copy'} {f}...")
     
     try:
       skipCopy = False
@@ -159,7 +176,7 @@ def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFil
 
         # If it's a match, bail and don't save this incoming file.
         if(fHash == destHash):
-          print('Bailing, duplicate...')
+          if (args.verbose): print('Bailing, duplicate...')
           skipCopy = True
           break
 
@@ -170,10 +187,10 @@ def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFil
       if(skipCopy == False):
         if(move == False):
           shutil.copy2(f, duplicate)
-          print(f"to: {duplicate}")
+          if (args.verbose): print(f"to: {duplicate}")
         else:
           shutil.move(f, duplicate)
-          print(f"to: {duplicate}")
+          if (args.verbose): print(f"to: {duplicate}")
       else:
         if(move == True):
           os.remove(f)
@@ -183,15 +200,15 @@ def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFil
 
       if(move == False):
         shutil.copy2(f, errorDir + filename)
-        print(f"to: {errorDir + duplicate}")
+        if (args.verbose): print(f"to: {errorDir + duplicate}")
         # print here
       else:
         shutil.move(f, errorDir + filename)
-        print(f"to: {errorDir + duplicate}")
+        if (args.verbose): print(f"to: {errorDir + duplicate}")
         # print here
 
       print(str(e))
-      print(traceback.extract_stack())
+      print(traceback.format_exc())
       problems.append(f)
 
       et.terminate()
@@ -200,9 +217,54 @@ def copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFil
 def getUnderscoreOfSidecar(sidecar):
   """ sidecar: full path to sidecar """
   sidecar = os.path.split(sidecar)[1]
-  sidecar = os.path.splitext(sidecar)[0]
-  underscoredNumber = re.search(r'(_[0-9]$)', sidecar).group()
-  return "" if not len(underscoredNumber) else underscoredNumber
+  sidecarWithoutExt = os.path.splitext(sidecar)[0]
+  match = re.search(r'(_[0-9]$)', sidecarWithoutExt)
+  return "" if match is None else match.group()
+
+def sidecarIsRelevant(et, sidecar, f):
+  # while .xmp files have a raw file name pointing to the raw image,
+  # .aae files do not, so this is not really relevant. We do not want
+  # to copy an .xmp for a .jpg for which it is not relevant.
+  sExt = os.path.splitext(sidecar)[1]
+  if sExt == ".aae" or sExt == ".AAE": 
+    return True
+  else:
+    exiftoolOutput = et.execute("-RawFileName", sidecar)
+    if (exiftoolOutput):
+      rawFileName = exiftoolOutput.split(":")[1].strip().rstrip("")
+      imageFilename = os.path.split(f)[1]
+      return rawFileName == imageFilename
+
+
+def findRelevantSidecar(et, args, f, sidecarExtensions):
+  sidecar = str()
+  # Check for exact sidecar match
+  for ext in [".xmp"]:
+    ext = ext.lower()
+    potentialExactSidecars = []
+    potentialExactSidecars.append(os.path.join(os.path.splitext(f)[0] + ext))
+    potentialExactSidecars.append(f + ext) # e.g. "IMG_3323_CR2_shotwell.jpg.xmp"
+    for potentialExactSidecar in potentialExactSidecars:
+      if os.path.exists(potentialExactSidecar):
+        # if (args.verbose): print(f"Found metadata sidecar, will copy/move as well: {potentialExactSidecar}")
+        if (sidecarIsRelevant(et, potentialExactSidecar, f)):
+          sidecar = potentialExactSidecar
+          return sidecar
+  for ext in [".aae"]:
+    if (args.fuzzy and len(sidecar) == 0):
+      for ext in sidecarExtensions:
+        ext = ext.lower()
+        # get full path, without extension
+        fileWithoutExt = os.path.splitext(f)[0]
+        # split off whatever _# at the end
+        fileWithoutExtOrUnderscore = re.sub(r'(_[0-9]$)', '', fileWithoutExt)
+        globString = os.path.join(fileWithoutExtOrUnderscore) + '*' + ext
+        for n in glob.glob(globString):
+          if os.path.exists(n):
+            sidecar = n
+            # if (args.verbose): print(f"Found metadata sidecar fuzzily matched, will copy/move as well: {n}")
+            return sidecar
+  return None
 
 
 def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems, move, sourceDir, destDir, errorDir):
@@ -213,38 +275,17 @@ def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems,
   sourceDir: test_folders/test
   """
   
-  print("")
+  if (args.verbose): print("")
   print("Processing: %s..." % f)
+  global processed
+  processed += 1
 
   fExt = filenameExtension(f)
+  if fExt in ["cr2", "dng"]:
+    fExt = fExt.upper()
 
-  sidecar = str()
-  sidecarExt = str()
-  # Check for exact sidecar match
-  for sidecarExtension in sidecarExtensions:
-    sidecarExtension = sidecarExtension.lower()
-    potentialSidecar = os.path.join(os.path.splitext(f)[0] + sidecarExtension)
-    if os.path.exists(potentialSidecar):
-      print(f"Found metadata sidecar, will copy/move as well: {potentialSidecar}")
-      sidecar = potentialSidecar
-      sidecarExt = sidecarExtension
-      break
-    if (args.fuzzy and len(sidecar) == 0):
-      for sidecarExtension in sidecarExtensions:
-        sidecarExtension = sidecarExtension.lower()
-        # get full path, without extension
-        fileWithoutExt = os.path.splitext(f)[0]
-        # split off whatever _# at the end
-        fileWithoutExtOrUnderscore = re.sub(r'(_[0-9]$)', '', fileWithoutExt)
-        globString = os.path.join(fileWithoutExtOrUnderscore) + '*' + sidecarExtension
-        for n in glob.glob(globString):
-          if os.path.exists(n):
-            sidecar = n
-            sidecarFilename = os.path.split(sidecar)[1]
-            sidecarExt = sidecarExtension
-            print(f"Found metadata sidecar fuzzily matched, will copy/move as well: {n}")
-            break
-    
+  sidecar = findRelevantSidecar(et, args, f, sidecarExtensions)
+
   # Copy photos/videos into year and month subfolders. Name the copies according to
   # their timestamps. If more than one photo/video has the same timestamp, add
   # suffixes 0001, 0002, 0003, etc. to the names. 
@@ -257,25 +298,42 @@ def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems,
     day = pDate.day
     fHash = None
     
-    destFileName = pDate.strftime(fFmtName)
-    if (len(sidecar) > 0):
-      destSidecarFilename = destFileName + os.path.splitext(sidecar)[1]
+    # If we have a matching sidecar, use that sidecar for the filename instead.
+    destFileName = None
+    if sidecar is not None and os.path.splitext(sidecar)[1] == ".xmp":
+        rawFileName = et.execute("-RawFileName", sidecar).split(":")[1].strip().rstrip("")
+        # for some reason in this function extensions now do not have periods in front of them.
+        rawExtension = os.path.splitext(rawFileName)[1]
+        fExt = rawExtension.lstrip(".")
+        if (rawExtension == fExt):
+          destFileName = os.path.splitext(rawFileName)[0]
+    # either no sidecar, or the sidecar was for a different file (likely a CR2, and not a jpg)
+    if not destFileName: destFileName = pDate.strftime(fFmtName)
+
     thisDestDir = destDir + '/%04d/%04d-%02d-%02d' % (yr, yr, mo, day)
 
     if not os.path.exists(thisDestDir):
       os.makedirs(thisDestDir)
 
     duplicate = thisDestDir + '/%s.' % (destFileName) + fExt
-    if (len(sidecar) > 1):
-      duplicateSidecar = thisDestDir + '/%s' % (destFileName) + getUnderscoreOfSidecar(sidecar) + sidecarExt 
+    copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFileName, suffix, fExt, errorDir, move, args)
 
-    copyOrHash(et, duplicate, f, filename, problems, fHash, thisDestDir, destFileName, suffix, fExt, errorDir, move)
-    if (len(sidecar) > 0):
-      copyOrHash(et, duplicateSidecar, sidecar, sidecarFilename, problems, fHash, thisDestDir, destSidecarFilename, suffix, sidecarExt, errorDir, move)
+    if (sidecar is not None):
+      sidecarFilename = os.path.split(sidecar)[1]
+      sExt = os.path.splitext(sidecar)[1]
+      if (sExt == ".aae"):
+        destSidecarFilename = destFileName + getUnderscoreOfSidecar(sidecar)
+      else:
+        destSidecarFilename = destFileName
+      
+      duplicateSidecar = thisDestDir + '/%s' % (destSidecarFilename)
+      copyOrHash(et, duplicateSidecar, sidecar, sidecarFilename, problems, fHash, thisDestDir, destSidecarFilename, suffix, sExt, errorDir, move, args)
 
   except Exception as e:
-    print(traceback.extract_stack())
     print(str(e))
+    print(traceback.format_exc())
+    et.terminate()
+    sys.exit()
    
 
 ###################### Main program ########################
@@ -296,6 +354,7 @@ def main(argv):
     optional.add_argument('-m', '--move', action='store_true', help='Specify to move source files to their new location instead of copying.')
     optional.add_argument('-v', '--verbose', action='store_true', help="Show performance information for hashing and exiftool invocation.")
     optional.add_argument('-f', '--fuzzy', action='store_true', help="Drop underscores at the end of iPhone files and AAE files to find the best matching AAE sidecar file to copy/move.")
+    # add ignore errors here
     parser._action_groups.append(optional) # added this line
     args = parser.parse_args()
 
@@ -324,11 +383,12 @@ def main(argv):
     filenameFmt = "%Y%m%d-%H%M%S"
 
     # File Extensions we care about
-    photoExtensions = ['.JPG', '.PNG', '.THM', '.CR2', '.NEF', '.DNG', '.RAW', '.NEF', '.JPEG', '.RW2', '.ARW', '.HEIC', '.PSD', '.TIF']
+    photoExtensions = ['.JPG', '.PNG', '.THM', '.CR2', '.NEF', '.DNG', '.RAW', '.NEF', '.JPEG', '.RW2',
+                       '.ARW', '.HEIC', '.PSD', '.TIF', '.TIFF', '.BMP']
     # sidecarExtensions we care about
     sidecarExtensions = ['.AAE', '.XMP']
     # TODO: many many more extensions to test and see if they yield the correct create dates, both for photo and video.
-    videoExtensions = ['.3PG', '.MOV', '.MPG', '.MPEG', '.AVI', '.3GPP', '.MP4', '.ASF']
+    videoExtensions = ['.3PG', '.MOV', '.MPG', '.MPEG', '.MTS', '.AVI', '.3GPP', '.MP4', '.ASF']
     
     scanExtensions = photoExtensions
     if(scanType == 'VIDEO'):
@@ -346,10 +406,7 @@ def main(argv):
           if filename.upper().endswith(extension):
             f = os.path.join(root, filename)
             handleFileMove(et, f, filename, filenameFmt, sidecarExtensions, args, problems, move, sourceDir, destDir, errorDir)
-      # Happens at a kind of weird point in the sequence - after going over
-      # every filetype. For mixed folders (iPhoto libraries) this results in multiple
-      # attempts. @eaDir on DSM 7.2 may be screwing with things too, this holds extended
-      # data (e.g. previews of the photos we just moved!) and can be safely removed.
+    for root, dirnames, filenames in os.walk(sourceDir):
       if(move == True):
         removeEmptyFolders(sourceDir, False)
 
@@ -360,6 +417,7 @@ def main(argv):
       print("These can be found in: %s" % errorDir)
     else :
       print("\nSuccess!")
+      print(f"Processed {processed} files.")
 
     if args.verbose:
       global exiftool_invokes
