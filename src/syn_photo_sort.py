@@ -35,14 +35,26 @@ processed = int(0)
 
 def removeEmptyFolders(path, removeRoot=True):
   'Function to remove empty folders'
+  directoriesToDelete = ["@eaDir"]
+  filesToDelete = [".DS_Store"]
+
   if not os.path.isdir(path):
     return
 
-  # remove empty subfolders
-  unnecessaryDirectories = ["@eaDir", ".DS_Store"]
+  # remove @eaDir and .DS_Store
   files = os.listdir(path)
-  filteredFiles = list(filter((lambda x: all(x not in files for x in unnecessaryDirectories)), files)) # todo check this
-  if len(filteredFiles):
+  for f in files:
+    if f in directoriesToDelete:
+      fullpath = os.path.join(path, f)
+      # Remove Synology preview folders somewhat dangerously.
+      shutil.rmtree(fullpath)
+    if f in filesToDelete:
+      fullpath= os.path.join(path, f)
+      if os.path.exists(fullpath):
+        os.remove(fullpath)
+    
+  files = os.listdir(path)
+  if len(files):
     for f in files:
       fullpath = os.path.join(path, f)
       if os.path.isdir(fullpath):
@@ -207,7 +219,6 @@ def getUnderscoreOfSidecar(sidecar):
   sidecar = os.path.split(sidecar)[1]
   sidecarWithoutExt = os.path.splitext(sidecar)[0]
   match = re.search(r'(_[0-9]$)', sidecarWithoutExt)
-  print(f"found underscore: {match.group()}")
   return "" if match is None else match.group()
 
 def sidecarIsRelevant(et, sidecar, f):
@@ -235,7 +246,7 @@ def findRelevantSidecar(et, args, f, sidecarExtensions):
     potentialExactSidecars.append(f + ext) # e.g. "IMG_3323_CR2_shotwell.jpg.xmp"
     for potentialExactSidecar in potentialExactSidecars:
       if os.path.exists(potentialExactSidecar):
-        if (args.verbose): print(f"Found metadata sidecar, will copy/move as well: {potentialExactSidecar}")
+        # if (args.verbose): print(f"Found metadata sidecar, will copy/move as well: {potentialExactSidecar}")
         if (sidecarIsRelevant(et, potentialExactSidecar, f)):
           sidecar = potentialExactSidecar
           return sidecar
@@ -251,7 +262,7 @@ def findRelevantSidecar(et, args, f, sidecarExtensions):
         for n in glob.glob(globString):
           if os.path.exists(n):
             sidecar = n
-            if (args.verbose): print(f"Found metadata sidecar fuzzily matched, will copy/move as well: {n}")
+            # if (args.verbose): print(f"Found metadata sidecar fuzzily matched, will copy/move as well: {n}")
             return sidecar
   return None
 
@@ -315,7 +326,7 @@ def handleFileMove(et, f, filename, fFmtName, sidecarExtensions, args, problems,
       else:
         destSidecarFilename = destFileName
       
-      duplicateSidecar = thisDestDir + '/%s.' % (destFileName) + sExt
+      duplicateSidecar = thisDestDir + '/%s' % (destSidecarFilename)
       copyOrHash(et, duplicateSidecar, sidecar, sidecarFilename, problems, fHash, thisDestDir, destSidecarFilename, suffix, sExt, errorDir, move, args)
 
   except Exception as e:
@@ -377,7 +388,7 @@ def main(argv):
     # sidecarExtensions we care about
     sidecarExtensions = ['.AAE', '.XMP']
     # TODO: many many more extensions to test and see if they yield the correct create dates, both for photo and video.
-    videoExtensions = ['.3PG', '.MOV', '.MPG', '.MPEG', '.AVI', '.3GPP', '.MP4', '.ASF']
+    videoExtensions = ['.3PG', '.MOV', '.MPG', '.MPEG', '.MTS', '.AVI', '.3GPP', '.MP4', '.ASF']
     
     scanExtensions = photoExtensions
     if(scanType == 'VIDEO'):
@@ -395,10 +406,7 @@ def main(argv):
           if filename.upper().endswith(extension):
             f = os.path.join(root, filename)
             handleFileMove(et, f, filename, filenameFmt, sidecarExtensions, args, problems, move, sourceDir, destDir, errorDir)
-      # Happens at a kind of weird point in the sequence - after going over
-      # every filetype. For mixed folders (iPhoto libraries) this results in multiple
-      # attempts. @eaDir on DSM 7.2 may be screwing with things too, this holds extended
-      # data (e.g. previews of the photos we just moved!) and can be safely removed.
+    for root, dirnames, filenames in os.walk(sourceDir):
       if(move == True):
         removeEmptyFolders(sourceDir, False)
 
